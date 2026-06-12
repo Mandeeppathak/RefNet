@@ -14,6 +14,16 @@ from backend.api.auth_routes import router as auth_router
 
 app = FastAPI(title="RefNet API", version="1.0")
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # register auth routes
 app.include_router(auth_router)
 

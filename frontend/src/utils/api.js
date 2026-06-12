@@ -1,16 +1,13 @@
-// src/utils/api.js
 import axios from 'axios';
 
-const api = axios.create({ baseURL: 'http://localhost:8000' });
+const api = axios.create({ baseURL: 'https://web-production-704ff.up.railway.app' });
 
-// attach token to every request automatically
 api.interceptors.request.use(cfg => {
   const token = localStorage.getItem('token');
   if (token) cfg.headers.Authorization = `Bearer ${token}`;
   return cfg;
 });
 
-// auto logout on 401
 api.interceptors.response.use(
   r => r,
   err => {
