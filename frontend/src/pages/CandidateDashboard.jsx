@@ -128,6 +128,43 @@ export default function CandidateDashboard() {
   const [analyzing, setAnalyzing] = useState(false);
   const [gapData, setGapData] = useState(null);
   const [error, setError] = useState('');
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
+
+  // 1. Hydrate ID from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('profile_id');
+    if (stored) setProfileId(stored);
+  }, []);
+
+  // 2. Automatically load data if a profile ID exists
+  useEffect(() => {
+    if (!profileId) return;
+
+    const fetchDashboardData = async () => {
+      setLoadingDashboard(true);
+      try {
+        // Fetch matches
+        const m = await api.get(`/match/${profileId}`);
+        setMatches(m.data.matches || []);
+
+        // Fetch parsed profile schema directly to populate active view state
+        const p = await api.get(`/candidate/profile/${profileId}`);
+        if (p.data) setProfile(p.data.parsed_profile || p.data);
+      } catch (err) {
+        if (err.response?.status === 404) {
+          // Clear stale references if object is missing in active database instance
+          localStorage.removeItem('profile_id');
+          setProfileId(null);
+        } else {
+          setError('Failed to fetch profile matches');
+        }
+      } finally {
+        setLoadingDashboard(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [profileId]);
 
   const uploadResume = async e => {
     const file = e.target.files[0];
@@ -139,9 +176,7 @@ export default function CandidateDashboard() {
       const { data } = await api.post('/resume', fd);
       setProfile(data.parsed_profile);
       setProfileId(data.profile_id);
-      // fetch matches
-      const m = await api.get(`/match/${data.profile_id}`);
-      setMatches(m.data.matches || []);
+      localStorage.setItem('profile_id', data.profile_id);
     } catch (err) {
       setError(err.response?.data?.detail || 'Upload failed');
     } finally { setUploading(false); }
@@ -151,14 +186,25 @@ export default function CandidateDashboard() {
     setAnalyzing(true);
     try {
       const { data } = await api.post('/analyze', {
-        candidate_id: profileId,  // use stored profile ID
+        candidate_id: profileId,
         jd_id: match.jd_id,
       });
       setGapData({ analysis: data.gap_analysis, message: data.referral_message });
     } catch {
       setError('Analysis failed — try again');
-    } finally { setAnalyzing(false); }
+    } finally { Red(false); setAnalyzing(false); }
   };
+
+  if (loadingDashboard) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface-2)' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div className="spinner" style={{ width: 32, height: 32, margin: '0 auto 16px' }} />
+          <p style={{ fontWeight: 600 }}>Loading workspace dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--surface-2)' }}>
@@ -198,19 +244,16 @@ export default function CandidateDashboard() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <h3 style={{ fontSize: 20 }}>{profile.name}</h3>
+                  <h3 style={{ fontSize: 20 }}>{profile.name || 'Candidate Profile'}</h3>
                   <span className="badge badge-green">✅ Profile Active</span>
                 </div>
                 <div style={{ fontSize: 14, color: 'var(--ink-muted)', marginBottom: 12 }}>
-                  {profile.total_years_experience} years exp · {profile.education?.[0]?.degree}
+                  {profile.total_years_experience || profile.experience_years || 0} years exp · {profile.education?.[0]?.degree || 'Degree Completed'}
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {profile.skills?.slice(0, 8).map(s => (
-                    <span key={s} className="badge badge-purple">{s}</span>
+                  {(Array.isArray(profile.skills) ? profile.skills : typeof profile.skills === 'string' ? profile.skills.split(',') : []).slice(0, 8).map(s => (
+                    <span key={s} className="badge badge-purple">{s.trim()}</span>
                   ))}
-                  {profile.skills?.length > 8 && (
-                    <span className="badge badge-purple">+{profile.skills.length - 8} more</span>
-                  )}
                 </div>
               </div>
               <label className="btn btn-outline" style={{ cursor: 'pointer', flexShrink: 0 }}>
