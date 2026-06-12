@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
-import { Upload, Zap, TrendingUp, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { Upload, Zap, TrendingUp, Clock } from 'lucide-react';
 
 function MatchCard({ match, onAnalyze }) {
   const score = match.match_score;
@@ -130,41 +130,41 @@ export default function CandidateDashboard() {
   const [error, setError] = useState('');
   const [loadingDashboard, setLoadingDashboard] = useState(false);
 
-  // 1. Hydrate ID from localStorage on mount
-  useEffect(() => {
-    const stored = localStorage.getItem('profile_id');
-    if (stored) setProfileId(stored);
-  }, []);
+  // Load dashboard variables on application startup
+// Load dashboard variables on application startup
+useEffect(() => {
+  const fetchDashboardData = async () => {
+    setLoadingDashboard(true);
+    setError('');
+    try {
+      // Attempt to look up the active logged-in profile
+      const p = await api.get('/candidate/profile/me');
+      if (p.data) {
+        const actualProfile = p.data.parsed_profile || p.data;
+        const actualId = p.data.id || p.data.profile_id;
 
-  // 2. Automatically load data if a profile ID exists
-  useEffect(() => {
-    if (!profileId) return;
+        setProfile(actualProfile);
+        setProfileId(actualId);
 
-    const fetchDashboardData = async () => {
-      setLoadingDashboard(true);
-      try {
-        // Fetch matches
-        const m = await api.get(`/match/${profileId}`);
+        const m = await api.get(`/match/${actualId}`);
         setMatches(m.data.matches || []);
-
-        // Fetch parsed profile schema directly to populate active view state
-        const p = await api.get(`/candidate/profile/${profileId}`);
-        if (p.data) setProfile(p.data.parsed_profile || p.data);
-      } catch (err) {
-        if (err.response?.status === 404) {
-          // Clear stale references if object is missing in active database instance
-          localStorage.removeItem('profile_id');
-          setProfileId(null);
-        } else {
-          setError('Failed to fetch profile matches');
-        }
-      } finally {
-        setLoadingDashboard(false);
       }
-    };
+    } catch (err) {
+      // If 404, the user just hasn't uploaded a resume yet—don't throw an error alert banner
+      if (err.response?.status === 404) {
+        setProfile(null);
+        setProfileId(null);
+        localStorage.removeItem('profile_id');
+      } else {
+        setError('Failed to sync active match profile data.');
+      }
+    } finally {
+      setLoadingDashboard(false);
+    }
+  };
 
-    fetchDashboardData();
-  }, [profileId]);
+  fetchDashboardData();
+}, []);
 
   const uploadResume = async e => {
     const file = e.target.files[0];
@@ -174,25 +174,32 @@ export default function CandidateDashboard() {
       const fd = new FormData();
       fd.append('file', file);
       const { data } = await api.post('/resume', fd);
-      setProfile(data.parsed_profile);
-      setProfileId(data.profile_id);
-      localStorage.setItem('profile_id', data.profile_id);
+
+      const parsedProfile = data.parsed_profile;
+      const targetId = data.profile_id || data.id;
+
+      setProfile(parsedProfile);
+      setProfileId(targetId);
+      localStorage.setItem('profile_id', targetId);
+
+      const m = await api.get(`/match/${targetId}`);
+      setMatches(m.data.matches || []);
     } catch (err) {
       setError(err.response?.data?.detail || 'Upload failed');
     } finally { setUploading(false); }
   };
 
   const analyzeGap = async (match) => {
-    setAnalyzing(true);
+    setAnalyzing(true); setError('');
     try {
       const { data } = await api.post('/analyze', {
         candidate_id: profileId,
         jd_id: match.jd_id,
       });
       setGapData({ analysis: data.gap_analysis, message: data.referral_message });
-    } catch {
-      setError('Analysis failed — try again');
-    } finally { Red(false); setAnalyzing(false); }
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Analysis failed — try again');
+    } finally { setAnalyzing(false); }
   };
 
   if (loadingDashboard) {
@@ -216,9 +223,10 @@ export default function CandidateDashboard() {
             Hey {user?.full_name?.split(' ')[0]} 👋
           </h1>
           <p style={{ color: 'var(--ink-muted)' }}>Your skill-based job matching dashboard</p>
+          {error && <div className="form-error" style={{ marginTop: 12, maxWidth: '400px' }}>{error}</div>}
         </div>
 
-        {/* Upload */}
+        {/* Upload View */}
         {!profile && (
           <div className="card fade-up" style={{
             textAlign: 'center', padding: 48,
@@ -234,11 +242,10 @@ export default function CandidateDashboard() {
               {uploading ? <><div className="spinner" />Parsing resume...</> : '📄 Upload Resume (PDF)'}
               <input type="file" accept=".pdf" onChange={uploadResume} style={{ display: 'none' }} disabled={uploading} />
             </label>
-            {error && <div className="form-error" style={{ marginTop: 12 }}>{error}</div>}
           </div>
         )}
 
-        {/* Profile summary */}
+        {/* Profile Summary View */}
         {profile && (
           <div className="card fade-up" style={{ marginBottom: 28 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
@@ -264,7 +271,7 @@ export default function CandidateDashboard() {
           </div>
         )}
 
-        {/* Matches */}
+        {/* Matches Grid */}
         {matches.length > 0 && (
           <div className="fade-up">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -280,7 +287,7 @@ export default function CandidateDashboard() {
           </div>
         )}
 
-        {/* Empty matches */}
+        {/* Empty Matches Section */}
         {profile && matches.length === 0 && (
           <div className="card" style={{ textAlign: 'center', padding: 40 }}>
             <Clock size={32} color="var(--ink-muted)" style={{ marginBottom: 12 }} />
