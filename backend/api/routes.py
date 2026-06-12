@@ -41,9 +41,20 @@ class GradeRequest(BaseModel):
     answers: list
 
 
+
+
 @app.get("/")
 def root():
     return {"message": "RefNet API is running"}
+
+
+
+
+@app.get("/admin/scrape")
+def trigger_scrape():
+    from backend.automation.scraper import run_scraper
+    run_scraper()
+    return {"message": "Scrape complete"}
 
 
 @app.post("/resume")
