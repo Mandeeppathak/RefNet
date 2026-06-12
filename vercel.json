@@ -1,9 +1,0 @@
-{
-  "experimentalServices": {
-    "web": {
-      "type": "web",
-      "entrypoint": "main.py",
-      "routePrefix": "/"
-    }
-  }
-}

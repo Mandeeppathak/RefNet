@@ -122,6 +122,7 @@ function GapPanel({ analysis, message, onClose }) {
 export default function CandidateDashboard() {
   const { user } = useAuth();
   const [profile, setProfile] = useState(null);
+  const [profileId, setProfileId] = useState(null);
   const [matches, setMatches] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -137,6 +138,7 @@ export default function CandidateDashboard() {
       fd.append('file', file);
       const { data } = await api.post('/resume', fd);
       setProfile(data.parsed_profile);
+      setProfileId(data.profile_id);
       // fetch matches
       const m = await api.get(`/match/${data.profile_id}`);
       setMatches(m.data.matches || []);
@@ -145,11 +147,11 @@ export default function CandidateDashboard() {
     } finally { setUploading(false); }
   };
 
-  const analyzeGap = async match => {
+  const analyzeGap = async (match) => {
     setAnalyzing(true);
     try {
       const { data } = await api.post('/analyze', {
-        candidate_id: match.jd_id,
+        candidate_id: profileId,  // use stored profile ID
         jd_id: match.jd_id,
       });
       setGapData({ analysis: data.gap_analysis, message: data.referral_message });
