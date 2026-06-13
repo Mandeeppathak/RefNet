@@ -100,7 +100,7 @@ class MatchRequest(Base):
 
     id = Column(String, primary_key=True)
     candidate_id = Column(String, ForeignKey("candidate_profiles.id"), nullable=False)
-    referrer_id = Column(String, ForeignKey("referrer_profiles.id"), nullable=False)
+    referrer_id = Column(String, ForeignKey("referrer_profiles.id"), nullable=True)
     jd_id = Column(String, ForeignKey("job_descriptions.id"), nullable=False)
     match_score = Column(Float)
     gap_analysis_json = Column(Text)   # stored gap analysis

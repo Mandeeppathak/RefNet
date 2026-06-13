@@ -177,7 +177,7 @@ def analyze(
     match = MatchRequest(
         id=str(uuid4()),
         candidate_id=profile.id,
-        referrer_id=profile.id,
+        referrer_id=None,
         jd_id=jd.id,
         match_score=gap.get("match_percentage", 0),
         gap_analysis_json=json.dumps(gap),
