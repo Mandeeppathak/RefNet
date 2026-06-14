@@ -1,95 +1,160 @@
-// src/pages/CandidateDashboard.jsx
+// src/pages/ReferrerDashboard.jsx
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
-import { Upload, Zap, TrendingUp, Clock } from 'lucide-react';
+import { Briefcase, Star, Users, CheckCircle, XCircle, Plus, Trash2, PauseCircle, PlayCircle } from 'lucide-react';
 
-function MatchCard({ match, onAnalyze }) {
-  const score = match.match_score;
-  const color = score >= 60 ? 'var(--green)' : score >= 35 ? 'var(--yellow)' : 'var(--red)';
+export default function ReferrerDashboard() {
+  const { user } = useAuth();
+  const [requests, setRequests] = useState([]);
+  const [postedJobs, setPostedJobs] = useState([]);
+  const [stats, setStats] = useState({ total: 0, accepted: 0 });
+  const [jdForm, setJdForm] = useState({ jd_id: '', jd_text: '' });
+  const [posting, setPosting] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => {
+    // fetch posted jobs
+    api.get('/my-jobs')
+      .then(r => setPostedJobs(r.data.jobs || []))
+      .catch(() => {});
+  }, []);
+
+  const postJD = async e => {
+    e.preventDefault();
+    setPosting(true); setMsg('');
+    try {
+      await api.post('/jd', jdForm);
+      setMsg('✅ Job posted successfully!');
+      setJdForm({ jd_id: '', jd_text: '' });
+      setShowForm(false);
+      // refresh posted jobs
+      const r = await api.get('/my-jobs');
+      setPostedJobs(r.data.jobs || []);
+    } catch (err) {
+      setMsg('⚠️ ' + (err.response?.data?.detail || 'Failed to post job'));
+    } finally { setPosting(false); }
+  };
+
+  const toggleJob = async (id, isActive) => {
+    try {
+      await api.patch(`/jd/${id}`, { is_active: !isActive });
+      setPostedJobs(j => j.map(job => job.id === id ? { ...job, is_active: !isActive } : job));
+    } catch { alert('Toggle failed'); }
+  };
+
+  const deleteJob = async (id) => {
+    if (!window.confirm('Delete this job? This cannot be undone.')) return;
+    try {
+      await api.delete(`/jd/${id}`);
+      setPostedJobs(j => j.filter(job => job.id !== id));
+    } catch { alert('Delete failed'); }
+  };
+
+  const handleReferral = async (id, action) => {
+    try {
+      await api.get(`/referral/${action}/${id}`);
+      setRequests(r => r.map(req =>
+        req.id === id ? { ...req, status: action === 'accept' ? 'accepted' : 'rejected' } : req
+      ));
+      if (action === 'accept') setStats(s => ({ ...s, accepted: s.accepted + 1 }));
+    } catch { alert('Action failed'); }
+  };
+
   return (
-    <div className="card" style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-      <div className="score-ring" style={{ borderColor: color, color }}>
-        {score > 0 ? `${Math.round(score)}%` : 'N/A'}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 16 }}>{match.job_title}</div>
-        <div style={{ color: 'var(--ink-muted)', fontSize: 14, marginBottom: 10 }}>{match.company}</div>
-        <button className="btn btn-outline" style={{ padding: '6px 14px', fontSize: 13 }}
-          onClick={() => onAnalyze(match)}>
-          <Zap size={14} /> Analyze Gap
-        </button>
-      </div>
-    </div>
-  );
-}
+    <div style={{ minHeight: '100vh', background: 'var(--surface-2)' }}>
+      <div className="container" style={{ padding: '32px 24px' }}>
 
-function GapPanel({ analysis, message, onClose }) {
-  if (!analysis) return null;
-  const verdict = analysis.overall_verdict;
-  const verdictColor = verdict === 'Strong Match' ? 'var(--green)' : verdict === 'Good Match' ? 'var(--accent)' : verdict === 'Partial Match' ? 'var(--yellow)' : 'var(--red)';
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: 200, padding: 24,
-    }} onClick={onClose}>
-      <div className="card fade-up" style={{ maxWidth: 580, width: '100%', maxHeight: '90vh', overflowY: 'auto' }}
-        onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <h3 style={{ fontSize: 20 }}>Gap Analysis</h3>
-          <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={onClose}>✕</button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
-          <div style={{
-            background: verdictColor, color: 'white', padding: '6px 16px',
-            borderRadius: 20, fontWeight: 700, fontSize: 14,
-          }}>{verdict}</div>
-          <div style={{ fontSize: 13, color: 'var(--ink-muted)' }}>
-            AI Match: {analysis.match_percentage}%
+        <div style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <h1 style={{ fontSize: 28, marginBottom: 4 }}>Referrer Dashboard</h1>
+            <p style={{ color: 'var(--ink-muted)' }}>Help candidates get opportunities — anonymously</p>
           </div>
+          <button className="btn btn-primary" onClick={() => setShowForm(s => !s)}>
+            <Plus size={16} /> Post a Job
+          </button>
         </div>
 
-        {analysis.strong_points?.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--green)' }}>✅ Your Strengths</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {analysis.strong_points.map(s => (
-                <span key={s} className="badge badge-green">{s}</span>
-              ))}
+        {/* Stats */}
+        <div className="grid-3" style={{ marginBottom: 28 }}>
+          {[
+            { icon: <Briefcase size={20} />, label: 'Jobs Posted', value: postedJobs.length, color: 'var(--accent)' },
+            { icon: <CheckCircle size={20} />, label: 'Referred', value: stats.accepted, color: 'var(--green)' },
+            { icon: <Star size={20} />, label: 'Reputation', value: '⭐ New', color: 'var(--yellow)' },
+          ].map(s => (
+            <div key={s.label} className="card" style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 10, background: 'var(--surface-3)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', color: s.color,
+              }}>{s.icon}</div>
+              <div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700 }}>{s.value}</div>
+                <div style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{s.label}</div>
+              </div>
             </div>
+          ))}
+        </div>
+
+        {/* Post JD form */}
+        {showForm && (
+          <div className="card fade-up" style={{ marginBottom: 28 }}>
+            <h3 style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Briefcase size={18} color="var(--accent)" /> Post a Job for Referrals
+            </h3>
+            <form onSubmit={postJD}>
+              <div className="form-group">
+                <label className="form-label">Job ID (unique slug, no spaces)</label>
+                <input placeholder="e.g. razorpay_backend_2026" value={jdForm.jd_id}
+                  onChange={e => setJdForm(f => ({ ...f, jd_id: e.target.value }))} required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Job Description</label>
+                <textarea rows={6} placeholder="Paste the full job description here..."
+                  value={jdForm.jd_text}
+                  onChange={e => setJdForm(f => ({ ...f, jd_text: e.target.value }))}
+                  required style={{ resize: 'vertical' }} />
+              </div>
+              {msg && <div style={{ fontSize: 13, marginBottom: 12, color: msg.startsWith('✅') ? 'var(--green)' : 'var(--red)' }}>{msg}</div>}
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="submit" className="btn btn-primary" disabled={posting}>
+                  {posting ? <><div className="spinner" />Posting...</> : 'Post Job'}
+                </button>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
+              </div>
+            </form>
           </div>
         )}
 
-        {analysis.missing_critical?.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--red)' }}>⚠️ Critical Gaps</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {analysis.missing_critical.map(s => (
-                <span key={s} className="badge badge-red">{s}</span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {analysis.action_plan?.length > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>📋 Action Plan</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {analysis.action_plan.map((a, i) => (
-                <div key={i} style={{
-                  background: 'var(--surface-2)', borderRadius: 8, padding: '10px 14px',
-                  display: 'flex', gap: 10, alignItems: 'flex-start',
+        {/* My Posted Jobs */}
+        {postedJobs.length > 0 && (
+          <div style={{ marginBottom: 32 }}>
+            <h2 style={{ fontSize: 20, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Briefcase size={20} color="var(--accent)" /> My Posted Jobs
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {postedJobs.map(job => (
+                <div key={job.id} className="card" style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', flexWrap: 'wrap', gap: 12
                 }}>
-                  <span className={`badge badge-${a.priority === 'High' ? 'red' : a.priority === 'Medium' ? 'yellow' : 'green'}`}
-                    style={{ flexShrink: 0 }}>{a.priority}</span>
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{a.action}</div>
-                    <div style={{ fontSize: 12, color: 'var(--ink-muted)', marginTop: 2 }}>
-                      {a.timeline} · {a.resource}
-                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{job.job_title}</div>
+                    <div style={{ fontSize: 13, color: 'var(--ink-muted)' }}>{job.company} · <code style={{ fontSize: 11 }}>{job.id}</code></div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <span className={`badge badge-${job.is_active ? 'green' : 'yellow'}`}>
+                      {job.is_active ? 'Active' : 'Paused'}
+                    </span>
+                    <button className="btn btn-ghost" style={{ padding: '6px 10px' }}
+                      title={job.is_active ? 'Pause' : 'Activate'}
+                      onClick={() => toggleJob(job.id, job.is_active)}>
+                      {job.is_active ? <PauseCircle size={16} /> : <PlayCircle size={16} />}
+                    </button>
+                    <button className="btn btn-danger" style={{ padding: '6px 10px' }}
+                      title="Delete" onClick={() => deleteJob(job.id)}>
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -97,226 +162,68 @@ function GapPanel({ analysis, message, onClose }) {
           </div>
         )}
 
-        {message && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>✉️ Your Referral Message</div>
-            <div style={{
-              background: 'var(--surface-3)', borderLeft: '3px solid var(--accent)',
-              borderRadius: '0 8px 8px 0', padding: 14,
-              fontSize: 14, lineHeight: 1.7, color: 'var(--ink-soft)', fontStyle: 'italic',
-            }}>{message}</div>
-          </div>
-        )}
+        {/* Referral requests */}
+        <div>
+          <h2 style={{ fontSize: 20, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Users size={20} color="var(--accent)" /> Incoming Referral Requests
+          </h2>
 
-        <div style={{
-          background: 'var(--surface-2)', borderRadius: 8, padding: 12,
-          fontSize: 13, color: 'var(--ink-soft)', textAlign: 'center',
-        }}>
-          🔒 {analysis.referral_readiness}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function CandidateDashboard() {
-  const { user } = useAuth();
-  const [profile, setProfile] = useState(null);
-  const [profileId, setProfileId] = useState(null);
-  const [matches, setMatches] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [gapData, setGapData] = useState(null);
-  const [error, setError] = useState('');
-  const [loadingDashboard, setLoadingDashboard] = useState(false);
-
-  // Load dashboard variables on application startup
-// Load dashboard variables on application startup
-useEffect(() => {
-  const fetchDashboardData = async () => {
-    setLoadingDashboard(true);
-    setError('');
-    try {
-      // Attempt to look up the active logged-in profile
-      const p = await api.get('/candidate/profile/me');
-      if (p.data) {
-        const actualProfile = p.data.parsed_profile || p.data;
-        const actualId = p.data.id || p.data.profile_id;
-
-        setProfile(actualProfile);
-        setProfileId(actualId);
-
-        const m = await api.get(`/match/${actualId}`);
-        setMatches(m.data.matches || []);
-      }
-    } catch (err) {
-      // If 404, the user just hasn't uploaded a resume yet—don't throw an error alert banner
-      if (err.response?.status === 404) {
-        setProfile(null);
-        setProfileId(null);
-        localStorage.removeItem('profile_id');
-      } else {
-        setError('Failed to sync active match profile data.');
-      }
-    } finally {
-      setLoadingDashboard(false);
-    }
-  };
-
-  fetchDashboardData();
-}, []);
-
-  const uploadResume = async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setUploading(true); setError('');
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const { data } = await api.post('/resume', fd);
-
-      const parsedProfile = data.parsed_profile;
-      const targetId = data.profile_id || data.id;
-
-      setProfile(parsedProfile);
-      setProfileId(targetId);
-      localStorage.setItem('profile_id', targetId);
-
-      const m = await api.get(`/match/${targetId}`);
-      setMatches(m.data.matches || []);
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Upload failed');
-    } finally { setUploading(false); }
-  };
-
-  const analyzeGap = async (match) => {
-    setAnalyzing(true); setError('');
-    try {
-      const { data } = await api.post('/analyze', {
-        candidate_id: profileId,
-        jd_id: match.jd_id,
-      });
-      setGapData({ analysis: data.gap_analysis, message: data.referral_message });
-    } catch (err) {
-      setError(err.response?.data?.detail || 'Analysis failed — try again');
-    } finally { setAnalyzing(false); }
-  };
-
-  if (loadingDashboard) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface-2)' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div className="spinner" style={{ width: 32, height: 32, margin: '0 auto 16px' }} />
-          <p style={{ fontWeight: 600 }}>Loading workspace dashboard...</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ minHeight: '100vh', background: 'var(--surface-2)' }}>
-      <div className="container" style={{ padding: '32px 24px' }}>
-
-        {/* Header */}
-        <div style={{ marginBottom: 32 }}>
-          <h1 style={{ fontSize: 28, marginBottom: 4 }}>
-            Hey {user?.full_name?.split(' ')[0]} 👋
-          </h1>
-          <p style={{ color: 'var(--ink-muted)' }}>Your skill-based job matching dashboard</p>
-          {error && <div className="form-error" style={{ marginTop: 12, maxWidth: '400px' }}>{error}</div>}
-        </div>
-
-        {/* Upload View */}
-        {!profile && (
-          <div className="card fade-up" style={{
-            textAlign: 'center', padding: 48,
-            border: '2px dashed var(--border)', background: 'var(--surface)',
-            marginBottom: 28,
-          }}>
-            <Upload size={40} color="var(--accent)" style={{ marginBottom: 16 }} />
-            <h3 style={{ marginBottom: 8 }}>Upload your resume to get started</h3>
-            <p style={{ color: 'var(--ink-muted)', fontSize: 14, marginBottom: 20 }}>
-              PDF only · Our AI parses your skills instantly
-            </p>
-            <label className="btn btn-primary" style={{ cursor: 'pointer' }}>
-              {uploading ? <><div className="spinner" />Parsing resume...</> : '📄 Upload Resume (PDF)'}
-              <input type="file" accept=".pdf" onChange={uploadResume} style={{ display: 'none' }} disabled={uploading} />
-            </label>
-          </div>
-        )}
-
-        {/* Profile Summary View */}
-        {profile && (
-          <div className="card fade-up" style={{ marginBottom: 28 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  <h3 style={{ fontSize: 20 }}>{profile.name || 'Candidate Profile'}</h3>
-                  <span className="badge badge-green">✅ Profile Active</span>
-                </div>
-                <div style={{ fontSize: 14, color: 'var(--ink-muted)', marginBottom: 12 }}>
-                  {profile.total_years_experience || profile.experience_years || 0} years exp · {profile.education?.[0]?.degree || 'Degree Completed'}
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {(Array.isArray(profile.skills) ? profile.skills : typeof profile.skills === 'string' ? profile.skills.split(',') : []).slice(0, 8).map(s => (
-                    <span key={s} className="badge badge-purple">{s.trim()}</span>
-                  ))}
-                </div>
-              </div>
-              <label className="btn btn-outline" style={{ cursor: 'pointer', flexShrink: 0 }}>
-                <Upload size={14} /> Update Resume
-                <input type="file" accept=".pdf" onChange={uploadResume} style={{ display: 'none' }} />
-              </label>
+          {requests.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: 48 }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>🤝</div>
+              <h3 style={{ marginBottom: 8 }}>No requests yet</h3>
+              <p style={{ color: 'var(--ink-muted)', fontSize: 14 }}>
+                Post a job above — candidates will be automatically matched and you'll get
+                an email when someone requests a referral.
+              </p>
             </div>
-          </div>
-        )}
-
-        {/* Matches Grid */}
-        {matches.length > 0 && (
-          <div className="fade-up">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <TrendingUp size={20} color="var(--accent)" />
-              <h2 style={{ fontSize: 20 }}>Your Top Matches</h2>
-              <span className="badge badge-purple">{matches.length} jobs</span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px,1fr))', gap: 16 }}>
-              {matches.map(m => (
-                <MatchCard key={m.jd_id} match={m} onAnalyze={analyzeGap} />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {requests.map(req => (
+                <div key={req.id} className="card">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>
+                        <div className="score-ring" style={{ width: 48, height: 48, fontSize: 13 }}>
+                          {Math.round(req.match_score)}%
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 700 }}>{req.job_title}</div>
+                          <div style={{ fontSize: 13, color: 'var(--ink-muted)' }}>Anonymous Candidate</div>
+                        </div>
+                        <span className={`badge badge-${req.status === 'accepted' ? 'green' : req.status === 'rejected' ? 'red' : 'yellow'}`}>
+                          {req.status}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 10 }}>
+                        <strong>Skills:</strong> {req.candidate_skills}
+                      </div>
+                      {req.referral_message && (
+                        <div style={{
+                          background: 'var(--surface-2)', borderLeft: '3px solid var(--accent)',
+                          padding: '10px 14px', borderRadius: '0 8px 8px 0',
+                          fontSize: 13, color: 'var(--ink-soft)', fontStyle: 'italic',
+                        }}>"{req.referral_message}"</div>
+                      )}
+                    </div>
+                    {req.status === 'pending' && (
+                      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                        <button className="btn btn-success" style={{ padding: '8px 16px' }}
+                          onClick={() => handleReferral(req.id, 'accept')}>
+                          <CheckCircle size={14} /> Refer
+                        </button>
+                        <button className="btn btn-ghost" style={{ padding: '8px 16px' }}
+                          onClick={() => handleReferral(req.id, 'decline')}>
+                          <XCircle size={14} /> Pass
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Empty Matches Section */}
-        {profile && matches.length === 0 && (
-          <div className="card" style={{ textAlign: 'center', padding: 40 }}>
-            <Clock size={32} color="var(--ink-muted)" style={{ marginBottom: 12 }} />
-            <h3 style={{ marginBottom: 8 }}>Finding your matches...</h3>
-            <p style={{ color: 'var(--ink-muted)', fontSize: 14 }}>
-              Our scraper adds new jobs every 24 hours. Check back soon.
-            </p>
-          </div>
-        )}
-
-        {analyzing && (
-          <div style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
-          }}>
-            <div className="card" style={{ textAlign: 'center', padding: 32 }}>
-              <div className="spinner" style={{ width: 32, height: 32, margin: '0 auto 16px' }} />
-              <p style={{ fontWeight: 600 }}>Analyzing your gap...</p>
-            </div>
-          </div>
-        )}
-
-        {gapData && (
-          <GapPanel
-            analysis={gapData.analysis}
-            message={gapData.message}
-            onClose={() => setGapData(null)}
-          />
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

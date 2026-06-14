@@ -40,7 +40,8 @@ class GradeRequest(BaseModel):
     skill: str
     answers: list
 
-
+class ToggleJDRequest(BaseModel):
+    is_active: bool
 
 
 @app.get("/")
@@ -48,13 +49,37 @@ def root():
     return {"message": "RefNet API is running"}
 
 
-
-
 @app.get("/admin/scrape")
 def trigger_scrape():
     from backend.automation.scraper import run_scraper
     run_scraper()
     return {"message": "Scrape complete"}
+
+
+# ── CANDIDATE PROFILE ────────────────────────────────────────
+
+@app.get("/candidate/profile/me")
+def get_my_profile(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """WHY: Frontend loads this on dashboard mount to restore profile state."""
+    if current_user.role != "candidate":
+        raise HTTPException(status_code=403, detail="Candidates only")
+    profile = db.query(CandidateProfile).filter(
+        CandidateProfile.user_id == current_user.id
+    ).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="No profile yet")
+    parsed = json.loads(profile.resume_parsed_json) if profile.resume_parsed_json else {}
+    return {
+        "id": profile.id,
+        "profile_id": profile.id,
+        "parsed_profile": parsed,
+        "skills": profile.skills,
+        "experience_years": profile.experience_years,
+        "verified_skills": json.loads(profile.verified_skills or "[]")
+    }
 
 
 @app.post("/resume")
@@ -65,16 +90,12 @@ async def upload_resume(
 ):
     if current_user.role != "candidate":
         raise HTTPException(status_code=403, detail="Only candidates can upload resumes")
-
     if not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files accepted")
 
-    # WHY tempfile: Railway is ephemeral — no persistent disk.
-    # We write to a temp file, parse it, then delete it immediately.
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         shutil.copyfileobj(file.file, tmp)
         temp_path = tmp.name
-
     try:
         parsed = parse_resume(temp_path)
     finally:
@@ -104,44 +125,13 @@ async def upload_resume(
     db.commit()
     db.refresh(profile)
     embed_and_store_resume(profile.id, parsed)
-
     return {"profile_id": profile.id, "parsed_profile": parsed}
-
-
-@app.post("/jd")
-def submit_jd(
-    request: JDRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    if current_user.role != "referrer":
-        raise HTTPException(status_code=403, detail="Only referrers can post JDs")
-
-    parsed = parse_job_description(request.jd_text)
-
-    existing = db.query(JobDescription).filter(JobDescription.id == request.jd_id).first()
-    if existing:
-        existing.parsed_json = json.dumps(parsed)
-        existing.jd_text = request.jd_text
-    else:
-        jd = JobDescription(
-            id=request.jd_id,
-            company=parsed.get("company", ""),
-            job_title=parsed.get("job_title", ""),
-            jd_text=request.jd_text,
-            parsed_json=json.dumps(parsed)
-        )
-        db.add(jd)
-
-    db.commit()
-    embed_and_store_jd(request.jd_id, parsed)
-    return {"jd_id": request.jd_id, "parsed_jd": parsed}
 
 
 @app.get("/match/{profile_id}")
 def match_candidate(
     profile_id: str,
-    top_k: int = 5,
+    top_k: int = 20,
     current_user: User = Depends(get_current_user)
 ):
     matches = find_matching_jds_for_candidate(profile_id, top_k)
@@ -189,10 +179,100 @@ def analyze(
     return {
         "candidate_id": request.candidate_id,
         "jd_id": request.jd_id,
+        "job_title": jd.job_title,
+        "company": jd.company,
         "gap_analysis": gap,
         "referral_message": message
     }
 
+
+# ── REFERRER JD MANAGEMENT ───────────────────────────────────
+
+@app.post("/jd")
+def submit_jd(
+    request: JDRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "referrer":
+        raise HTTPException(status_code=403, detail="Only referrers can post JDs")
+
+    parsed = parse_job_description(request.jd_text)
+
+    existing = db.query(JobDescription).filter(JobDescription.id == request.jd_id).first()
+    if existing:
+        existing.parsed_json = json.dumps(parsed)
+        existing.jd_text = request.jd_text
+        existing.posted_by = current_user.id
+    else:
+        jd = JobDescription(
+            id=request.jd_id,
+            company=parsed.get("company", ""),
+            job_title=parsed.get("job_title", ""),
+            jd_text=request.jd_text,
+            parsed_json=json.dumps(parsed),
+            posted_by=current_user.id,
+            is_active=True
+        )
+        db.add(jd)
+
+    db.commit()
+    embed_and_store_jd(request.jd_id, parsed)
+    return {"jd_id": request.jd_id, "parsed_jd": parsed}
+
+
+@app.get("/my-jobs")
+def get_my_jobs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if current_user.role != "referrer":
+        raise HTTPException(status_code=403, detail="Referrers only")
+    jobs = db.query(JobDescription).filter(
+        JobDescription.posted_by == current_user.id
+    ).all()
+    return {"jobs": [
+        {"id": j.id, "job_title": j.job_title, "company": j.company, "is_active": j.is_active}
+        for j in jobs
+    ]}
+
+
+@app.patch("/jd/{jd_id}")
+def toggle_jd(
+    jd_id: str,
+    request: ToggleJDRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    jd = db.query(JobDescription).filter(
+        JobDescription.id == jd_id,
+        JobDescription.posted_by == current_user.id
+    ).first()
+    if not jd:
+        raise HTTPException(status_code=404, detail="JD not found")
+    jd.is_active = request.is_active
+    db.commit()
+    return {"message": "Updated", "is_active": jd.is_active}
+
+
+@app.delete("/jd/{jd_id}")
+def delete_jd(
+    jd_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    jd = db.query(JobDescription).filter(
+        JobDescription.id == jd_id,
+        JobDescription.posted_by == current_user.id
+    ).first()
+    if not jd:
+        raise HTTPException(status_code=404, detail="JD not found")
+    db.delete(jd)
+    db.commit()
+    return {"message": "Deleted"}
+
+
+# ── REFERRAL FLOW ────────────────────────────────────────────
 
 @app.get("/referral/accept/{match_request_id}")
 def accept_referral(match_request_id: str, db: Session = Depends(get_db)):
@@ -210,19 +290,27 @@ def accept_referral(match_request_id: str, db: Session = Depends(get_db)):
     candidate_profile = db.query(CandidateProfile).filter(CandidateProfile.id == match.candidate_id).first()
     candidate_user = db.query(User).filter(User.id == candidate_profile.user_id).first()
     jd = db.query(JobDescription).filter(JobDescription.id == match.jd_id).first()
-    referrer = db.query(ReferrerProfile).filter(ReferrerProfile.id == match.referrer_id).first()
-    referrer_user = db.query(User).filter(User.id == referrer.user_id).first()
 
-    referrer.referral_count += 1
-    referrer.reputation_score = round(referrer.reputation_score + 1.0, 1)
-    db.commit()
+    # only notify if a real referrer exists
+    if match.referrer_id:
+        referrer = db.query(ReferrerProfile).filter(ReferrerProfile.id == match.referrer_id).first()
+        if referrer:
+            referrer.referral_count += 1
+            referrer.reputation_score = round(referrer.reputation_score + 1.0, 1)
+            db.commit()
+            referrer_user = db.query(User).filter(User.id == referrer.user_id).first()
+            referrer_name = referrer_user.full_name if referrer_user else "A RefNet Member"
+        else:
+            referrer_name = "A RefNet Member"
+    else:
+        referrer_name = "A RefNet Member"
 
     notify_referral_accepted(
         candidate_email=candidate_user.email,
         candidate_name=candidate_user.full_name,
         job_title=jd.job_title,
         company=jd.company,
-        referrer_name=referrer_user.full_name
+        referrer_name=referrer_name
     )
 
     return {
@@ -243,6 +331,8 @@ def decline_referral(match_request_id: str, db: Session = Depends(get_db)):
     db.commit()
     return {"message": "Referral declined"}
 
+
+# ── SKILL VERIFICATION ───────────────────────────────────────
 
 @app.get("/verify/assessment/{skill}")
 def get_assessment(
@@ -284,5 +374,4 @@ def get_company_card(
     company_name: str,
     current_user: User = Depends(get_current_user)
 ):
-    card = generate_company_card(company_name)
-    return card
+    return generate_company_card(company_name)
